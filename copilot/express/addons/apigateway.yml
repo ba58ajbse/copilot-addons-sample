@@ -1,0 +1,80 @@
+Parameters:
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service, job, or workflow is being deployed to.
+  Name:
+    Type: String
+    Description: The name of the service, job, or workflow being deployed.
+  DiscoveryServiceARN:
+    Type: String
+    Description: The ARN of the Cloud Map discovery service.
+
+Resources:
+  VpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: !Sub "${App}-${Env}-${Name}"
+      SubnetIds:
+        !Split [",", Fn::ImportValue: !Sub "${App}-${Env}-PrivateSubnets"]
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub "${App}-${Env}-EnvironmentSecurityGroup"
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: HttpApiSample
+      ProtocolType: HTTP
+    DependsOn: VpcLink
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  Integration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      ConnectionId: !Ref VpcLink
+      ConnectionType: VPC_LINK
+      IntegrationMethod: ANY
+      IntegrationType: HTTP_PROXY
+      IntegrationUri: !Sub "${DiscoveryServiceARN}"
+      PayloadFormatVersion: "1.0"
+    DependsOn:
+      - VpcLink
+      - HttpApi
+
+  Route:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "ANY /{proxy+}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref Authorizer
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref Integration
+    DependsOn:
+      - Authorizer
+      - Integration
+
+  Authorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - "$request.header.Authorization"
+      JwtConfiguration:
+        Audience:
+          - ""
+        Issuer: ""
+      Name: api-sample
+    DependsOn: HttpApi

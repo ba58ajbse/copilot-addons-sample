@@ -1,0 +1,2 @@
+Parameters:
+  DiscoveryServiceARN: !GetAtt DiscoveryService.Arn
